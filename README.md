@@ -6,7 +6,7 @@ The code was written by [Vladimir V. Kniaz](https://github.com/vlkniaz) and [Sol
 
 **Note**: The current software works well with PyTorch 1.2+ and Python 3.7+.
 
-**Pix2pix:  [Project](http://zefirus.org/en/MAG) |  [Paper](https://nips.cc/Conferences/2019/Schedule)**
+**MAG:  [Project](http://zefirus.org/en/MAG) |  [Paper](https://nips.cc/Conferences/2019/Schedule)**
 
 <img src='imgs/teaser.png'/>
 
