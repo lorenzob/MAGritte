@@ -1,7 +1,3 @@
-<img src='imgs/horse2zebra.gif' align="right" width=384>
-
-<br><br><br>
-
 # MAGritte in PyTorch
 
 We provide PyTorch implementations for both unpaired and paired image-to-image translation.
@@ -17,7 +13,7 @@ To implement custom models and datasets, check out our [templates](#custom-model
 
 **Pix2pix:  [Project](https://phillipi.github.io/pix2pix/) |  [Paper](https://arxiv.org/pdf/1611.07004.pdf) |  [Torch](https://github.com/phillipi/pix2pix)**
 
-![img](teaser.png)
+![Teaser](imgs/teaser.png)
 
 ## Prerequisites
 - Linux or macOS
