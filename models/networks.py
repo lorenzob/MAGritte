@@ -8,13 +8,6 @@ from torch.optim import lr_scheduler
 ###############################################################################
 # Helper Functions
 ###############################################################################
-
-
-class Identity(nn.Module):
-    def forward(self, x):
-        return x
-
-
 def get_norm_layer(norm_type='instance'):
     """Return a normalization layer
 
@@ -29,7 +22,7 @@ def get_norm_layer(norm_type='instance'):
     elif norm_type == 'instance':
         norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
     elif norm_type == 'none':
-        norm_layer = lambda x: Identity()
+        norm_layer = None
     else:
         raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
     return norm_layer
@@ -62,6 +55,41 @@ def get_scheduler(optimizer, opt):
     else:
         return NotImplementedError('learning rate policy [%s] is not implemented', opt.lr_policy)
     return scheduler
+
+def balancedL1_single(real_C, fake_C):
+    area_white = torch.abs(torch.clamp(real_C, 0, 100)).sum()   # white area
+    area_black = torch.abs(torch.clamp(real_C, -100, 0)).sum()   # black area
+    
+    if area_white == 0:
+        area_white = 1.0
+    if area_black == 0:
+        area_black = 1.0
+    
+    k = 1
+    
+    # false negative        
+    dif = torch.abs(torch.clamp(real_C - fake_C, 0, 100))        
+    missed_fakes = dif.sum() / area_white
+    # false positive
+    dif = torch.abs(torch.clamp(real_C - fake_C, -100, 0))        
+    false_fakes = dif.sum() / area_black * k
+    loss_Gc_L1 = missed_fakes + false_fakes
+
+    return loss_Gc_L1
+
+def balancedL1(real_C, fake_C, weights=None):
+    num_channels = real_C.shape[1]
+    loss_L1 = 0
+    for c in range(0, num_channels):
+        #print('c {} l1 {}'.format(c, balancedL1_single(real_C[:,c,:,:], fake_C[:,c,:,:])))
+        if weights is None:
+            loss_L1 += balancedL1_single(real_C[:,c,:,:], fake_C[:,c,:,:])
+        else:
+            loss_L1 += balancedL1_single(real_C[:,c,:,:], fake_C[:,c,:,:]) * weights[c]
+
+    #loss_L1 = torch.abs(real_C - fake_C).sum()
+
+    return loss_L1
 
 
 def init_weights(net, init_type='normal', init_gain=0.02):
@@ -154,6 +182,14 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unetnn_256':
+        net = UnetNNGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unet_512':
+        net = UnetGenerator(input_nc, output_nc, 9, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unetnn_512':
+        net = UnetNNGenerator(input_nc, output_nc, 9, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unetnn_1024':
+        net = UnetNNGenerator(input_nc, output_nc, 10, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -199,7 +235,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
     elif netD == 'pixel':     # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     else:
-        raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
+        raise NotImplementedError('Discriminator model name [%s] is not recognized' % net)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
@@ -295,8 +331,9 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
         elif type == 'fake':
             interpolatesv = fake_data
         elif type == 'mixed':
-            alpha = torch.rand(real_data.shape[0], 1, device=device)
+            alpha = torch.rand(real_data.shape[0], 1)
             alpha = alpha.expand(real_data.shape[0], real_data.nelement() // real_data.shape[0]).contiguous().view(*real_data.shape)
+            alpha = alpha.to(device)
             interpolatesv = alpha * real_data + ((1 - alpha) * fake_data)
         else:
             raise NotImplementedError('{} not implemented'.format(type))
@@ -534,6 +571,127 @@ class UnetSkipConnectionBlock(nn.Module):
         else:   # add skip connections
             return torch.cat([x, self.model(x)], 1)
 
+class UnetNNGenerator(nn.Module):
+    """Create a Unet-based generator"""
+
+    def __init__(self, input_nc, output_nc, num_downs, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+        """Construct a Unet generator
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            output_nc (int) -- the number of channels in output images
+            num_downs (int) -- the number of downsamplings in UNet. For example, # if |num_downs| == 7,
+                                image of size 128x128 will become of size 1x1 # at the bottleneck
+            ngf (int)       -- the number of filters in the last conv layer
+            norm_layer      -- normalization layer
+
+        We construct the U-Net from the innermost layer to the outermost layer.
+        It is a recursive process.
+        """
+        super(UnetNNGenerator, self).__init__()
+        # construct unet structure
+        unet_block = UnetNNSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
+        for i in range(num_downs - 5):          # add intermediate layers with ngf * 8 filters
+            unet_block = UnetNNSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
+        # gradually reduce the number of filters from ngf * 8 to ngf
+        unet_block = UnetNNSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetNNSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetNNSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        self.model = UnetNNSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+
+    def forward(self, input):
+        """Standard forward"""
+        return self.model(input)
+
+class UnetNNSkipConnectionBlock(nn.Module):
+    """Defines the Unet submodule with skip connection.
+        X -------------------identity----------------------
+        |-- downsampling -- |submodule| -- upsampling --|
+    """
+
+    def __init__(self, outer_nc, inner_nc, input_nc=None,
+                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
+        """Construct a Unet submodule with skip connections.
+
+        Parameters:
+            outer_nc (int) -- the number of filters in the outer conv layer
+            inner_nc (int) -- the number of filters in the inner conv layer
+            input_nc (int) -- the number of channels in input images/features
+            submodule (UnetSkipConnectionBlock) -- previously defined submodules
+            outermost (bool)    -- if this module is the outermost module
+            innermost (bool)    -- if this module is the innermost module
+            norm_layer          -- normalization layer
+            user_dropout (bool) -- if use dropout layers.
+        """
+        super(UnetNNSkipConnectionBlock, self).__init__()
+        self.outermost = outermost
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+        if input_nc is None:
+            input_nc = outer_nc
+        downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=4,
+                             stride=2, padding=1, bias=use_bias)
+        downrelu = nn.LeakyReLU(0.2, True)
+        downnorm = norm_layer(inner_nc)
+        uprelu = nn.ReLU(True)
+        upnorm = norm_layer(outer_nc)
+        #upnorm1 = norm_layer(outer_nc)
+
+        if outermost:
+            upscale = nn.UpsamplingNearest2d(scale_factor=2)
+            pad = nn.ReflectionPad2d(1)
+            updownconv = nn.Conv2d(inner_nc * 2, outer_nc, kernel_size=3,
+                             stride=1, padding=0, bias=use_bias)
+            #updownconv1 = nn.Conv2d(outer_nc, outer_nc, kernel_size=3,
+            #                 stride=1, padding=1, bias=use_bias)
+            #upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
+            #                            kernel_size=4, stride=2,
+            #                            padding=1)
+            down = [downconv]
+            #up = [uprelu, upconv, nn.Tanh()]
+            up = [uprelu, upscale, pad, updownconv, nn.Tanh()]
+            model = down + [submodule] + up
+        elif innermost:
+            upscale = nn.UpsamplingNearest2d(scale_factor=2)
+            pad = nn.ReflectionPad2d(1)
+            updownconv = nn.Conv2d(inner_nc, outer_nc, kernel_size=3,
+                             stride=1, padding=0, bias=use_bias)
+            #updownconv1 = nn.Conv2d(outer_nc, outer_nc, kernel_size=3,
+            #                 stride=1, padding=1, bias=use_bias)
+            #upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
+            #                            kernel_size=4, stride=2,
+            #                            padding=1, bias=use_bias)
+            down = [downrelu, downconv]
+            #up = [uprelu, upconv, upnorm]
+            up = [uprelu, upscale, pad, updownconv, upnorm]
+            model = down + up
+        else:
+            upscale = nn.UpsamplingNearest2d(scale_factor=2)
+            pad = nn.ReflectionPad2d(1)
+            updownconv = nn.Conv2d(inner_nc * 2, outer_nc, kernel_size=3,
+                             stride=1, padding=0, bias=use_bias)
+            #updownconv1 = nn.Conv2d(outer_nc, outer_nc, kernel_size=3,
+            #                 stride=1, padding=1, bias=use_bias)
+            #upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
+            #                            kernel_size=4, stride=2,
+            #                            padding=1, bias=use_bias)
+            down = [downrelu, downconv, downnorm]
+            #up = [uprelu, upconv, upnorm]
+            up = [uprelu, upscale, pad, updownconv, upnorm]
+
+            if use_dropout:
+                model = down + [submodule] + up + [nn.Dropout(0.5)]
+            else:
+                model = down + [submodule] + up
+
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        if self.outermost:
+            return self.model(x)
+        else:   # add skip connections
+            return torch.cat([x, self.model(x)], 1)
 
 class NLayerDiscriminator(nn.Module):
     """Defines a PatchGAN discriminator"""
@@ -549,9 +707,9 @@ class NLayerDiscriminator(nn.Module):
         """
         super(NLayerDiscriminator, self).__init__()
         if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
-            use_bias = norm_layer.func == nn.InstanceNorm2d
+            use_bias = norm_layer.func != nn.BatchNorm2d
         else:
-            use_bias = norm_layer == nn.InstanceNorm2d
+            use_bias = norm_layer != nn.BatchNorm2d
 
         kw = 4
         padw = 1
@@ -596,9 +754,9 @@ class PixelDiscriminator(nn.Module):
         """
         super(PixelDiscriminator, self).__init__()
         if type(norm_layer) == functools.partial:  # no need to use bias as BatchNorm2d has affine parameters
-            use_bias = norm_layer.func == nn.InstanceNorm2d
+            use_bias = norm_layer.func != nn.InstanceNorm2d
         else:
-            use_bias = norm_layer == nn.InstanceNorm2d
+            use_bias = norm_layer != nn.InstanceNorm2d
 
         self.net = [
             nn.Conv2d(input_nc, ndf, kernel_size=1, stride=1, padding=0),

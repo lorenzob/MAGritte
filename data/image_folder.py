@@ -7,6 +7,7 @@ so that this class can load images from both current directory and its subdirect
 import torch.utils.data as data
 
 from PIL import Image
+from random import shuffle
 import os
 import os.path
 
@@ -29,6 +30,137 @@ def make_dataset(dir, max_dataset_size=float("inf")):
             if is_image_file(fname):
                 path = os.path.join(root, fname)
                 images.append(path)
+    return images[:min(max_dataset_size, len(images))]
+
+
+def make_magritte_dataset(dir, max_dataset_size=float("inf")):
+    images = []
+    assert os.path.isdir(dir), '%s is not a valid directory' % dir
+    dir_fake       = os.path.join(dir, 'ColorFakeImages')
+    dir_real       = os.path.join(dir, 'ColorRealImages')
+    dir_label_fake = os.path.join(dir, 'SegmentationFake')
+
+    for root, _, fnames in sorted(os.walk(dir_fake)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):
+                path_fake = os.path.join(root, fname)
+                #path_real = os.path.join(dir_real, fname)
+                path_label_fake = os.path.join(dir_label_fake, fname)
+                images.append({'A':path_fake, 'B':'', 'C':path_label_fake})
+    
+    j = 0
+    for root, _, fnames in sorted(os.walk(dir_real)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):                
+                path_real = os.path.join(root, fname)
+                images[j]['B'] = path_real
+                j += 1                
+    
+    return images[:min(max_dataset_size, len(images))]
+
+def make_magritte_edge_dataset(dir, max_dataset_size=float("inf")):
+    images = []
+    assert os.path.isdir(dir), '%s is not a valid directory' % dir
+    dir_fake       = os.path.join(dir, 'ColorFakeImages')
+    dir_real       = os.path.join(dir, 'ColorRealImages')
+    dir_label_fake = os.path.join(dir, 'SegmentationFake')
+    dir_label_fake_egde = os.path.join(dir, 'SegmentationFakeEdge')
+
+    for root, _, fnames in sorted(os.walk(dir_fake)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):
+                path_fake = os.path.join(root, fname)
+                #path_real = os.path.join(dir_real, fname)
+                path_label_fake = os.path.join(dir_label_fake, fname)
+                path_label_fake_edge = os.path.join(dir_label_fake_egde, fname)
+                images.append({'A':path_fake, 'B':'', 'C':path_label_fake, 'C_edge':path_label_fake_edge})
+    
+    j = 0
+    for root, _, fnames in sorted(os.walk(dir_real)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):                
+                path_real = os.path.join(root, fname)
+                images[j]['B'] = path_real
+                j += 1                
+    
+    return images[:min(max_dataset_size, len(images))]
+    
+def make_magritte_sem_dataset(dir, max_dataset_size=float("inf")):
+    images = []
+    assert os.path.isdir(dir), '%s is not a valid directory' % dir
+    dir_fake       = os.path.join(dir, 'ColorFakeImages')
+    dir_real       = os.path.join(dir, 'ColorRealImages')
+    dir_label_fake = os.path.join(dir, 'SegmentationFake')
+    dir_sem_real   = os.path.join(dir, 'SegmentationRealClass')
+    dir_sem_fake   = os.path.join(dir, 'SegmentationFakeClass')
+
+
+    for root, _, fnames in sorted(os.walk(dir_fake)):
+        shuffle(fnames)
+        for fname in fnames:
+            if is_image_file(fname):
+                path_fake = os.path.join(root, fname)
+                path_label_fake = os.path.join(dir_label_fake, fname)
+                path_class_fake = os.path.join(dir_sem_fake, fname)
+                images.append({'A':path_fake, 'B':'', 'CA_fake':path_label_fake, 'CA_class':path_class_fake, 'CB_class':''})
+    
+    j = 0
+    for root, _, fnames in sorted(os.walk(dir_real)):
+        shuffle(fnames)
+        for fname in fnames:
+            if is_image_file(fname):                
+                path_real = os.path.join(root, fname)
+                path_sem_real = os.path.join(dir_sem_real, fname)
+                images[j]['B'] = path_real
+                images[j]['CB_class'] = path_sem_real
+                j += 1                
+    
+    return images[:min(max_dataset_size, len(images))]
+
+def make_magritte_edge_sem_dataset(dir, max_dataset_size=float("inf")):
+    images = []
+    assert os.path.isdir(dir), '%s is not a valid directory' % dir
+    dir_fake       = os.path.join(dir, 'ColorFakeImages')
+    dir_real       = os.path.join(dir, 'ColorRealImages')
+    dir_label_fake = os.path.join(dir, 'SegmentationFake')
+    dir_label_fake_egde = os.path.join(dir, 'SegmentationFakeEdge')
+    dir_sem_real   = os.path.join(dir, 'SegmentationRealClass')
+    dir_sem_fake   = os.path.join(dir, 'SegmentationFakeClass')
+
+    for root, _, fnames in sorted(os.walk(dir_fake)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):
+                path_fake = os.path.join(root, fname)
+                #path_real = os.path.join(dir_real, fname)
+                path_class_fake = os.path.join(dir_sem_fake, fname)
+                path_label_fake = os.path.join(dir_label_fake, fname)
+                path_label_fake_edge = os.path.join(dir_label_fake_egde, fname)
+                images.append({'A':path_fake, 'B':'', 'CA_fake':path_label_fake, 'CA_edge':path_label_fake_edge, 'CA_class':path_class_fake, 'CB_class':''})
+    
+    j = 0
+    for root, _, fnames in sorted(os.walk(dir_real)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):                
+                path_real = os.path.join(root, fname)
+                path_sem_real = os.path.join(dir_sem_real, fname)
+                images[j]['B'] = path_real
+                images[j]['CB_class'] = path_sem_real
+                j += 1                
+    
+    return images[:min(max_dataset_size, len(images))]
+
+def make_ab_dataset(dir, max_dataset_size=float("inf")):
+    images = []
+    assert os.path.isdir(dir), '%s is not a valid directory' % dir
+    dir_fake       = os.path.join(dir, 'ColorFakeImages')
+    dir_real       = os.path.join(dir, 'ColorRealImages')
+
+    for root, _, fnames in sorted(os.walk(dir_fake)):
+        for fname in sorted(fnames):
+            if is_image_file(fname):
+                path_fake = os.path.join(root, fname)
+                path_real = os.path.join(dir_real, fname)
+                images.append({'A':path_fake, 'B':path_real})
     return images[:min(max_dataset_size, len(images))]
 
 
