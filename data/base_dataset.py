@@ -69,6 +69,9 @@ def get_params(opt, size):
     elif opt.preprocess == 'scale_width_and_crop':
         new_w = opt.load_size
         new_h = opt.load_size * h // w
+    elif opt.preprocess == 'scale_height_and_crop':
+        new_w = opt.load_size * w // h
+        new_h = opt.load_size           
 
     x = random.randint(0, np.maximum(0, new_w - opt.crop_size))
     y = random.randint(0, np.maximum(0, new_h - opt.crop_size))
@@ -87,6 +90,8 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
         transform_list.append(transforms.Resize(osize, method))
     elif 'scale_width' in opt.preprocess:
         transform_list.append(transforms.Lambda(lambda img: __scale_width(img, opt.load_size, method)))
+    elif 'scale_height' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __scale_height(img, opt.load_size, method)))
 
     if 'crop' in opt.preprocess:
         if params is None:
@@ -103,12 +108,15 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
         elif params['flip']:
             transform_list.append(transforms.Lambda(lambda img: __flip(img, params['flip'])))
 
+    means = (0.5, 0.5, 0.5)
+    stds = (0.5, 0.5, 0.5)
+    if grayscale:
+        means = [0.5]
+        stds = [0.5]
+
     if convert:
-        transform_list += [transforms.ToTensor()]
-        if grayscale:
-            transform_list += [transforms.Normalize((0.5,), (0.5,))]
-        else:
-            transform_list += [transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        transform_list += [transforms.ToTensor(),
+                           transforms.Normalize(means, stds)]
     return transforms.Compose(transform_list)
 
 
@@ -131,6 +139,13 @@ def __scale_width(img, target_width, method=Image.BICUBIC):
     h = int(target_width * oh / ow)
     return img.resize((w, h), method)
 
+def __scale_height(img, target_height, method=Image.BICUBIC):
+    ow, oh = img.size
+    if (oh == target_height):
+        return img
+    h = target_height
+    w = int(target_height * ow / oh)
+    return img.resize((w, h), method)
 
 def __crop(img, pos, size):
     ow, oh = img.size
