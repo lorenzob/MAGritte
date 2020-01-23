@@ -8,6 +8,8 @@ import torch.utils.data as data
 from PIL import Image
 import torchvision.transforms as transforms
 from abc import ABC, abstractmethod
+import cv2
+from skimage.transform import resize
 
 
 class BaseDataset(data.Dataset, ABC):
@@ -81,6 +83,37 @@ def get_params(opt, size):
     return {'crop_pos': (x, y), 'flip': flip}
 
 
+def get_transform_np(opt, chanels, params=None):
+    transform_list = []
+    if 'resize' in opt.preprocess:
+        raise NotImplementedError
+        # osize = [opt.load_size, opt.load_size]
+        # transform_list.append(transforms.Resize(osize, method))
+    elif 'scale_width' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __scale_width_np(img, opt.load_size)))
+    elif 'scale_height' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __scale_height_np(img, opt.load_size)))
+
+    if 'crop' in opt.preprocess:
+        transform_list.append(transforms.Lambda(lambda img: __crop_np(img, params['crop_pos'], opt.crop_size)))
+
+    if opt.preprocess == 'none':
+        raise NotImplementedError
+        # transform_list.append(transforms.Lambda(lambda img: __make_power_2(img, base=4, method=method)))
+
+    if not opt.no_flip:
+        transform_list.append(transforms.Lambda(lambda img: np.fliplr(img).copy()))
+    # transform_list.append(transforms.Lambda(lambda img: print(img.shape, np.min(img), np.max(img))))
+
+    means = [0.5] * chanels
+    stds = [0.5] * chanels
+
+    # Covert
+    transform_list += [transforms.ToTensor(),
+                       transforms.Normalize(means, stds)]
+    return transforms.Compose(transform_list)
+
+
 def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, convert=True):
     transform_list = []
     if grayscale:
@@ -131,6 +164,16 @@ def __make_power_2(img, base, method=Image.BICUBIC):
     return img.resize((w, h), method)
 
 
+def __scale_width_np(img, target_width):
+    oh, ow, oc = img.shape
+
+    if (ow == target_width):
+        return img
+    else:
+        w = target_width
+        h = int(target_width * oh / ow)
+        return resize(img*255, (w, h, oc), anti_aliasing=False).astype(np.uint8)
+
 def __scale_width(img, target_width, method=Image.BICUBIC):
     ow, oh = img.size
     if (ow == target_width):
@@ -139,13 +182,36 @@ def __scale_width(img, target_width, method=Image.BICUBIC):
     h = int(target_width * oh / ow)
     return img.resize((w, h), method)
 
+def __scale_height_np(img, target_height):
+    oh, ow, oc = img.shape
+
+    if oh == target_height:
+        return img
+    else:
+        h = target_height
+        w = int(target_height * ow / oh)
+        return resize(img*255, (w, h, oc), anti_aliasing=False).astype(np.uint8)
+
 def __scale_height(img, target_height, method=Image.BICUBIC):
     ow, oh = img.size
+
     if (oh == target_height):
         return img
-    h = target_height
-    w = int(target_height * ow / oh)
-    return img.resize((w, h), method)
+    else:
+        h = target_height
+        w = int(target_height * ow / oh)
+        return img.resize((w, h), method)
+
+def __crop_np(img, pos, size):
+    oh, ow, oc = img.shape
+    tw = th = size
+
+    x1, y1 = pos
+    x2, y2 = x1 + tw, y1 + th
+    if ow > tw or oh > th:
+        return img[x1:x2, y1:y2]
+    else:
+        return img
 
 def __crop(img, pos, size):
     ow, oh = img.size

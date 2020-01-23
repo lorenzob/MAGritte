@@ -10,6 +10,8 @@ from PIL import Image
 from random import shuffle
 import os
 import os.path
+import pandas as pd
+from pathlib import Path
 
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
@@ -117,37 +119,33 @@ def make_magritte_sem_dataset(dir, max_dataset_size=float("inf")):
     
     return images[:min(max_dataset_size, len(images))]
 
-def make_magritte_edge_sem_dataset(dir, max_dataset_size=float("inf")):
-    images = []
-    assert os.path.isdir(dir), '%s is not a valid directory' % dir
-    dir_fake       = os.path.join(dir, 'ColorFakeImages')
-    dir_real       = os.path.join(dir, 'ColorRealImages')
-    dir_label_fake = os.path.join(dir, 'SegmentationFake')
-    dir_label_fake_egde = os.path.join(dir, 'SegmentationFakeEdge')
-    dir_sem_real   = os.path.join(dir, 'SegmentationRealClass')
-    dir_sem_fake   = os.path.join(dir, 'SegmentationFakeClass')
 
-    for root, _, fnames in sorted(os.walk(dir_fake)):
-        for fname in sorted(fnames):
-            if is_image_file(fname):
-                path_fake = os.path.join(root, fname)
-                #path_real = os.path.join(dir_real, fname)
-                path_class_fake = os.path.join(dir_sem_fake, fname)
-                path_label_fake = os.path.join(dir_label_fake, fname)
-                path_label_fake_edge = os.path.join(dir_label_fake_egde, fname)
-                images.append({'A':path_fake, 'B':'', 'CA_fake':path_label_fake, 'CA_edge':path_label_fake_edge, 'CA_class':path_class_fake, 'CB_class':''})
-    
-    j = 0
-    for root, _, fnames in sorted(os.walk(dir_real)):
-        for fname in sorted(fnames):
-            if is_image_file(fname):                
-                path_real = os.path.join(root, fname)
-                path_sem_real = os.path.join(dir_sem_real, fname)
-                images[j]['B'] = path_real
-                images[j]['CB_class'] = path_sem_real
-                j += 1                
+def make_magritte_edge_sem_dataset(dir, max_dataset_size=float("inf"), is_train=False):
+    dir = Path(dir)
+    assert dir.is_dir(), '%s is not a valid directory' % dir
+    images = []
+
+    df = pd.read_pickle(os.path.join(dir, "image_db.pkl"))
+    fake_df = df[df["is_test"] == (not is_train)][df["is_real"] == 0]
+    fake_fnames = fake_df["img_name"].to_list()
+
+    for fname in sorted(fake_fnames):
+        path_real = dir.joinpath("ColorRealImages", fname[12:])
+        path_label_fake = dir.joinpath("SegmentationFake", fname).with_suffix(".npz")
+        path_class_fake = dir.joinpath("SegmentationFakeClass", fname).with_suffix(".npz")
+        path_label_fake_edge = dir.joinpath("SegmentationFakeEdge", fname).with_suffix(".npz")
+        path_sem_real = dir.joinpath("SegmentationRealClass", fname[12:-4]).with_suffix(".npz")
+
+        images.append({'A': str(dir.joinpath("ColorFakeImages", fname)),
+                       'B': str(path_real),
+                       'CA_fake': str(path_label_fake),
+                       'CA_edge': str(path_label_fake_edge),
+                       'CA_class': str(path_class_fake),
+                       'CB_class': str(path_sem_real)
+                       })
     
     return images[:min(max_dataset_size, len(images))]
+
 
 def make_ab_dataset(dir, max_dataset_size=float("inf")):
     images = []
